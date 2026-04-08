@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from core.game_state import GameState, Player, GamePhase
 from core.roles import RoleType, Camp
 from agents.memory_manager import MemoryManager
+from pydantic import BaseModel, Field
 
 
 class ReasoningEngine:
@@ -184,41 +185,32 @@ class ReasoningEngine:
 1. 你的【思考】中应该说明你打算怎么说
 2. 你的【发言】必须和【思考】中的打算一致！
 
-格式要求：
-【思考】
-（你的思考内容，200-300字）
-
-【发言】
-（你的发言内容，100-300字，必须和思考一致）
+【输出格式要求】
+输出必须严格遵循以下JSON结构：
+    {{
+        "thinking": "字符串类型，必需字段，你的思考内容，200-300字",
+        "speech": "字符串类型，必需字段，你的发言内容，100-300字，必须和思考一致"
+    }}
 
 请严格按照格式和要求输出。""")
             ])
+
+            class Speech(BaseModel):
+                """白天阶段的发言"""
+                thinking: str = Field(description="你的思考内容")
+                speech: str = Field(description="你的发言内容")
+
+            llm_with_structure = self.llm.with_structured_output(Speech)
             
-            chain = prompt | self.llm
+            chain = prompt | llm_with_structure
             response = chain.invoke({
                 "game_analysis": str(game_analysis),
                 "memories": memories,
                 "context": context
             })
-            
-            full_text = response.content
-            thinking = None
-            speech = ""
-            
-            if '【发言】' in full_text:
-                parts = full_text.split('【发言】', 1)
-                thinking_part = parts[0].replace('【思考】', '').replace('[思考]', '').strip()
-                if thinking_part:
-                    thinking = thinking_part
-                speech = parts[1].strip()
-            elif '[发言]' in full_text:
-                parts = full_text.split('[发言]', 1)
-                thinking_part = parts[0].replace('【思考】', '').replace('[思考]', '').strip()
-                if thinking_part:
-                    thinking = thinking_part
-                speech = parts[1].strip()
-            else:
-                speech = full_text
+
+            thinking = response.thinking
+            speech = response.speech
             
             if speech:
                 self.memory_manager.record_observation(f"我发言：{speech}", 6)
@@ -272,25 +264,29 @@ class ReasoningEngine:
 2. 你的【选择】必须和【思考】中决定的人选完全一致！
 3. 绝对不能出现思考说选A，但选择写B的情况！
 
-格式要求：
-【思考】
-（你的思考内容，200-300字，必须明确说出要选谁的名字）
-
-【选择】
-（玩家ID，只写数字，必须和思考一致）
+【输出格式要求】
+输出必须严格遵循以下JSON结构：
+    {{
+        "thinking": "字符串类型，必需字段，你的思考内容，200-300字，必须明确说出要选谁的名字或不行动",
+        "chosen_id": "整数类型，必需字段，你选择的玩家ID，只写数字；如果不行动，写-1；必须和思考一致"
+    }}
 
 请严格按照格式和要求输出。""")
             ])
 
+            class Choice(BaseModel):
+                thinking: str = Field(description="你的思考内容")
+                chosen_id: int = Field(description="你选择的玩家ID")
 
-            chain = prompt | self.llm
+            llm_with_structure = self.llm.with_structured_output(Choice)
+
+            chain = prompt | llm_with_structure
             response = chain.invoke({
                 "memories": memories,
                 "candidates": candidate_list
             })
-            
-            full_text = response.content
-            thinking, chosen_id = self._parse_action_response(full_text)
+
+            thinking, chosen_id = response.thinking, response.chosen_id
             
             if chosen_id is None or chosen_id not in candidates:
                 if thinking:
@@ -372,25 +368,30 @@ class ReasoningEngine:
 2. 你的【选择】必须和【思考】中决定的完全一致！
 3. 绝对不能出现思考说选A，但选择写B的情况！
 
-格式要求：
-【思考】
-（你的思考内容，200-300字，必须明确说出要选谁的名字或不行动）
-
-【选择】
-（玩家ID，只写数字；如果不行动，写-1；必须和思考一致）
+【输出格式要求】
+输出必须严格遵循以下JSON结构：
+{{
+  "thinking": "字符串类型，必需字段，你的思考内容，200-300字，必须明确说出要选谁的名字或不行动",
+  "chosen_id": "整数类型，必需字段，你选择的玩家ID，只写数字；如果不行动，写-1；必须和思考一致"
+}}
 
 请严格按照格式和要求输出。""")
             ])
-            
-            chain = prompt | self.llm
+
+            class Choice(BaseModel):
+                thinking: str = Field(description="你的思考内容")
+                chosen_id: int = Field(description="你选择的玩家ID")
+
+            llm_with_structure = self.llm.with_structured_output(Choice)
+
+            chain = prompt | llm_with_structure
             response = chain.invoke({
                 "memories": memories,
                 "targets": target_list,
                 "action_description": action_descriptions.get(action_type, "请做出选择")
             })
-            
-            full_text = response.content
-            thinking, chosen_id = self._parse_action_response(full_text)
+
+            thinking, chosen_id = response.thinking, response.chosen_id
             
             if chosen_id is None or (chosen_id != -1 and chosen_id not in available_targets):
                 if thinking:
